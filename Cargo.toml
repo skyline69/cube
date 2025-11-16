@@ -1,0 +1,10 @@
+[package]
+name = "cube"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cgmath = "0.18.0"
+gl = "0.14.0"
+glfw = "0.60.0"
+rusttype = "0.9.3"
