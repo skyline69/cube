@@ -51,12 +51,11 @@ fn link_program(vs: u32, fs: u32) -> u32 {
 /// Build an 8-bit alpha bitmap for the text, automatically scaled so it fits
 /// inside a fixed square texture (e.g. 512×512) with a margin, and centered.
 fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
-    static FONT_DATA: &[u8] = include_bytes!("Arial.ttf");
+    static FONT_DATA: &[u8] = include_bytes!("../assets/Arial.ttf");
     let font = Font::try_from_bytes(FONT_DATA).expect("Invalid font");
 
-    // Final texture size used for the cube (square).
     const TEX_SIZE: u32 = 512;
-    const MARGIN_FRAC: f32 = 0.8; // text occupies at most 80% of width/height
+    const MARGIN_FRAC: f32 = 0.8;
 
     // 1) Measure at a base scale.
     let base_scale_val = 64.0;
@@ -82,14 +81,12 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
     }
 
     if min_x == i32::MAX {
-        // empty text
         return (Vec::new(), TEX_SIZE, TEX_SIZE);
     }
 
     let base_w = (max_x - min_x) as f32;
     let base_h = (max_y - min_y) as f32;
 
-    // 2) Compute scale factor so text fits into MARGIN_FRAC of TEX_SIZE.
     let max_w = TEX_SIZE as f32 * MARGIN_FRAC;
     let max_h = TEX_SIZE as f32 * MARGIN_FRAC;
 
@@ -101,7 +98,6 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
     let final_scale = Scale::uniform(final_scale_val);
     let v_metrics = font.v_metrics(final_scale);
 
-    // 3) Layout again at final scale and recompute bounding box.
     let glyphs: Vec<_> = font
         .layout(text, final_scale, point(0.0, v_metrics.ascent))
         .collect();
@@ -128,7 +124,6 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
     let tex_w_i = tex_w as i32;
     let tex_h_i = tex_h as i32;
 
-    // Center the text inside the texture.
     let x_offset = (tex_w_i - text_w as i32) / 2 - min_x;
     let y_offset = (tex_h_i - text_h as i32) / 2 - min_y;
 
@@ -142,7 +137,6 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
                 if x >= 0 && x < tex_w_i && y >= 0 && y < tex_h_i {
                     let idx = (y as u32 * tex_w + x as u32) as usize;
                     let val = (v * 255.0) as u8;
-                    // In case glyphs overlap, take max alpha.
                     bitmap[idx] = bitmap[idx].max(val);
                 }
             });
@@ -184,7 +178,8 @@ fn main() {
     let label = env::args().nth(1).unwrap_or_else(|| "cube".to_string());
     let window_title = format!("cube - {label}");
 
-    let mut glfw = glfw::init(glfw::fail_on_errors).unwrap();
+    let mut glfw = glfw::init(glfw::fail_on_errors).expect("Failed to init GLFW");
+
     glfw.window_hint(glfw::WindowHint::ContextVersionMajor(3));
     glfw.window_hint(glfw::WindowHint::ContextVersionMinor(3));
     glfw.window_hint(glfw::WindowHint::OpenGlProfile(
@@ -235,10 +230,7 @@ fn main() {
         uniform sampler2D u_tex;
 
         void main() {
-            // flip Y so text is upright
             float cov = texture(u_tex, vec2(vUV.x, 1.0 - vUV.y)).r;
-
-            // white background, black text
             vec3 color = mix(vec3(1.0), vec3(0.0, 0.0, 0.0), cov);
             FragColor = vec4(color, 1.0);
         }
@@ -250,6 +242,35 @@ fn main() {
     unsafe {
         gl::DeleteShader(cube_vs);
         gl::DeleteShader(cube_fs);
+    }
+
+    // Edge shaders (black lines)
+    let edge_vs_src = r#"
+        #version 330 core
+        layout (location = 0) in vec3 aPos;
+
+        uniform mat4 u_mvp;
+
+        void main() {
+            gl_Position = u_mvp * vec4(aPos, 1.0);
+        }
+    "#;
+
+    let edge_fs_src = r#"
+        #version 330 core
+        out vec4 FragColor;
+
+        void main() {
+            FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+    "#;
+
+    let edge_vs = compile_shader(edge_vs_src, gl::VERTEX_SHADER);
+    let edge_fs = compile_shader(edge_fs_src, gl::FRAGMENT_SHADER);
+    let edge_program = link_program(edge_vs, edge_fs);
+    unsafe {
+        gl::DeleteShader(edge_vs);
+        gl::DeleteShader(edge_fs);
     }
 
     // Cube vertices: position (x,y,z) + uv (u,v)
@@ -302,6 +323,67 @@ fn main() {
         gl::BindVertexArray(0);
     }
 
+    // Edge geometry: 8 corners, 12 edges as lines.
+    let edge_vertices: [f32; 8 * 3] = [
+        // back face
+        -0.5, -0.5, -0.5, // 0
+        0.5, -0.5, -0.5, // 1
+        0.5, 0.5, -0.5, // 2
+        -0.5, 0.5, -0.5, // 3
+        // front face
+        -0.5, -0.5, 0.5, // 4
+        0.5, -0.5, 0.5, // 5
+        0.5, 0.5, 0.5, // 6
+        -0.5, 0.5, 0.5, // 7
+    ];
+
+    let edge_indices: [u32; 24] = [
+        // back square
+        0, 1, 1, 2, 2, 3, 3, 0, // front square
+        4, 5, 5, 6, 6, 7, 7, 4, // connections
+        0, 4, 1, 5, 2, 6, 3, 7,
+    ];
+
+    let mut edge_vao = 0;
+    let mut edge_vbo = 0;
+    let mut edge_ebo = 0;
+
+    unsafe {
+        gl::GenVertexArrays(1, &mut edge_vao);
+        gl::GenBuffers(1, &mut edge_vbo);
+        gl::GenBuffers(1, &mut edge_ebo);
+
+        gl::BindVertexArray(edge_vao);
+
+        gl::BindBuffer(gl::ARRAY_BUFFER, edge_vbo);
+        gl::BufferData(
+            gl::ARRAY_BUFFER,
+            (edge_vertices.len() * std::mem::size_of::<f32>()) as isize,
+            edge_vertices.as_ptr() as *const _,
+            gl::STATIC_DRAW,
+        );
+
+        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, edge_ebo);
+        gl::BufferData(
+            gl::ELEMENT_ARRAY_BUFFER,
+            (edge_indices.len() * std::mem::size_of::<u32>()) as isize,
+            edge_indices.as_ptr() as *const _,
+            gl::STATIC_DRAW,
+        );
+
+        gl::VertexAttribPointer(
+            0,
+            3,
+            gl::FLOAT,
+            gl::FALSE,
+            (3 * std::mem::size_of::<f32>()) as i32,
+            ptr::null(),
+        );
+        gl::EnableVertexAttribArray(0);
+
+        gl::BindVertexArray(0);
+    }
+
     let cube_u_mvp_loc;
     let cube_u_tex_loc;
     unsafe {
@@ -310,7 +392,14 @@ fn main() {
             gl::GetUniformLocation(cube_program, CString::new("u_mvp").unwrap().as_ptr());
         cube_u_tex_loc =
             gl::GetUniformLocation(cube_program, CString::new("u_tex").unwrap().as_ptr());
-        gl::Uniform1i(cube_u_tex_loc, 0); // texture unit 0
+        gl::Uniform1i(cube_u_tex_loc, 0);
+    }
+
+    let edge_u_mvp_loc;
+    unsafe {
+        gl::UseProgram(edge_program);
+        edge_u_mvp_loc =
+            gl::GetUniformLocation(edge_program, CString::new("u_mvp").unwrap().as_ptr());
     }
 
     // Build text texture (auto-scaled and centered).
@@ -344,11 +433,16 @@ fn main() {
             Matrix4::from_angle_y(Deg(elapsed * 50.0)) * Matrix4::from_angle_x(Deg(elapsed * 30.0));
         let cube_mvp = proj * view * model;
 
+        // Slightly larger model for edges to avoid z-fighting
+        let edge_model = model * Matrix4::from_scale(1.001);
+        let edge_mvp = proj * view * edge_model;
+
         unsafe {
             gl::Viewport(0, 0, w, h);
             gl::ClearColor(0.1, 0.1, 0.1, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
+            // Draw cube with text
             gl::UseProgram(cube_program);
             gl::UniformMatrix4fv(cube_u_mvp_loc, 1, gl::FALSE, cube_mvp.as_ptr());
 
@@ -358,8 +452,41 @@ fn main() {
             gl::BindVertexArray(cube_vao);
             gl::DrawArrays(gl::TRIANGLES, 0, 36);
             gl::BindVertexArray(0);
+
+            // Draw edges on top
+            gl::UseProgram(edge_program);
+            gl::UniformMatrix4fv(edge_u_mvp_loc, 1, gl::FALSE, edge_mvp.as_ptr());
+
+            gl::BindVertexArray(edge_vao);
+            gl::LineWidth(2.0);
+            gl::DrawElements(
+                gl::LINES,
+                edge_indices.len() as i32,
+                gl::UNSIGNED_INT,
+                ptr::null(),
+            );
+            gl::BindVertexArray(0);
         }
 
         window.swap_buffers();
+        glfw.poll_events();
     }
+
+    // ----- CLEANUP -----
+
+    unsafe {
+        gl::DeleteVertexArrays(1, &cube_vao);
+        gl::DeleteBuffers(1, &cube_vbo);
+
+        gl::DeleteVertexArrays(1, &edge_vao);
+        gl::DeleteBuffers(1, &edge_vbo);
+        gl::DeleteBuffers(1, &edge_ebo);
+
+        gl::DeleteTextures(1, &text_tex);
+        gl::DeleteProgram(cube_program);
+        gl::DeleteProgram(edge_program);
+    }
+
+    drop(window);
+    drop(glfw);
 }

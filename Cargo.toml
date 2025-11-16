@@ -8,3 +8,10 @@ cgmath = "0.18.0"
 gl = "0.14.0"
 glfw = "0.60.0"
 rusttype = "0.9.3"
+
+[profile.release]
+opt-level = "z"   # or "3" if you prefer maximum speed
+lto = "fat"       # cross-crate LTO
+codegen-units = 1 # better optimization
+panic = "abort"   # removes unwinding runtime
+strip = "symbols" # removes debug symbols
