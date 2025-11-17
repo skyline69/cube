@@ -28,6 +28,12 @@ Why it’s cool
 - Edges stay crisp with a geometry-shader boost (falls back cleanly).
 - Simple OpenGL 3.3 pipeline; drop in another font if you like.
 
+Platform requirements
+---------------------
+- macOS: Xcode Command Line Tools (for clang) and an OpenGL 3.3-capable GPU/driver.
+- Windows: Latest Visual C++ Build Tools or MSVC via Visual Studio; GPU/driver with OpenGL 3.3 support.
+- Linux: Build essentials (`clang`/`gcc`, `make`), and GL loader packages (e.g., Ubuntu: `libx11-dev libgl1-mesa-dev libglu1-mesa-dev`).
+
 License
 -------
 MIT
