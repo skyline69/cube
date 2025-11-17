@@ -56,10 +56,12 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
 
     const TEX_SIZE: u32 = 512;
     const MARGIN_FRAC: f32 = 0.8;
+    const BASE_SCALE_VAL: f32 = 64.0;
+    const TEX_W: u32 = TEX_SIZE;
+    const TEX_H: u32 = TEX_SIZE;
 
     // 1) Measure at a base scale.
-    let base_scale_val = 64.0;
-    let base_scale = Scale::uniform(base_scale_val);
+    let base_scale = Scale::uniform(BASE_SCALE_VAL);
     let base_v_metrics = font.v_metrics(base_scale);
 
     let base_glyphs: Vec<_> = font
@@ -94,7 +96,7 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
     let sy = max_h / base_h;
     let scale_factor = sx.min(sy);
 
-    let final_scale_val = base_scale_val * scale_factor;
+    let final_scale_val = BASE_SCALE_VAL * scale_factor;
     let final_scale = Scale::uniform(final_scale_val);
     let v_metrics = font.v_metrics(final_scale);
 
@@ -119,15 +121,13 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
     let text_w = (max_x - min_x) as u32;
     let text_h = (max_y - min_y) as u32;
 
-    let tex_w = TEX_SIZE;
-    let tex_h = TEX_SIZE;
-    let tex_w_i = tex_w as i32;
-    let tex_h_i = tex_h as i32;
+    let tex_w_i = TEX_W as i32;
+    let tex_h_i = TEX_H as i32;
 
     let x_offset = (tex_w_i - text_w as i32) / 2 - min_x;
     let y_offset = (tex_h_i - text_h as i32) / 2 - min_y;
 
-    let mut bitmap = vec![0u8; (tex_w * tex_h) as usize];
+    let mut bitmap = vec![0u8; (TEX_W * TEX_H) as usize];
 
     for g in glyphs {
         if let Some(bb) = g.pixel_bounding_box() {
@@ -135,7 +135,7 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
                 let x = x as i32 + bb.min.x + x_offset;
                 let y = y as i32 + bb.min.y + y_offset;
                 if x >= 0 && x < tex_w_i && y >= 0 && y < tex_h_i {
-                    let idx = (y as u32 * tex_w + x as u32) as usize;
+                    let idx = (y as u32 * TEX_W + x as u32) as usize;
                     let val = (v * 255.0) as u8;
                     bitmap[idx] = bitmap[idx].max(val);
                 }
@@ -143,7 +143,7 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
         }
     }
 
-    (bitmap, tex_w, tex_h)
+    (bitmap, TEX_W, TEX_H)
 }
 
 fn create_text_texture(bitmap: &[u8], w: u32, h: u32) -> u32 {
@@ -305,9 +305,9 @@ fn main() {
             gl::STATIC_DRAW,
         );
 
-        let stride = (5 * std::mem::size_of::<f32>()) as i32;
+        const STRIDE: i32 = (5 * std::mem::size_of::<f32>()) as i32;
 
-        gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, stride, ptr::null());
+        gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, STRIDE, ptr::null());
         gl::EnableVertexAttribArray(0);
 
         gl::VertexAttribPointer(
@@ -315,7 +315,7 @@ fn main() {
             2,
             gl::FLOAT,
             gl::FALSE,
-            stride,
+            STRIDE,
             (3 * std::mem::size_of::<f32>()) as *const _,
         );
         gl::EnableVertexAttribArray(1);
@@ -371,14 +371,8 @@ fn main() {
             gl::STATIC_DRAW,
         );
 
-        gl::VertexAttribPointer(
-            0,
-            3,
-            gl::FLOAT,
-            gl::FALSE,
-            (3 * std::mem::size_of::<f32>()) as i32,
-            ptr::null(),
-        );
+        const EDGE_STRIDE: i32 = (3 * std::mem::size_of::<f32>()) as i32;
+        gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, EDGE_STRIDE, ptr::null());
         gl::EnableVertexAttribArray(0);
 
         gl::BindVertexArray(0);
