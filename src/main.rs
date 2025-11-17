@@ -27,10 +27,35 @@ fn compile_shader(src: &str, kind: gl::types::GLenum) -> u32 {
     }
 }
 
-fn link_program(vs: u32, fs: u32) -> u32 {
+fn compile_shader_fallible(src: &str, kind: gl::types::GLenum) -> Result<u32, String> {
+    unsafe {
+        let shader = gl::CreateShader(kind);
+        let c_src = CString::new(src).map_err(|e| e.to_string())?;
+        gl::ShaderSource(shader, 1, &c_src.as_ptr(), ptr::null());
+        gl::CompileShader(shader);
+
+        let mut success = 0;
+        gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
+        if success == 0 {
+            let mut len = 0;
+            gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+            let mut buf = vec![0; len as usize];
+            gl::GetShaderInfoLog(shader, len, ptr::null_mut(), buf.as_mut_ptr() as *mut i8);
+            gl::DeleteShader(shader);
+            return Err(String::from_utf8_lossy(&buf).to_string());
+        }
+
+        Ok(shader)
+    }
+}
+
+fn try_link_program(vs: u32, fs: u32, gs: Option<u32>) -> Result<u32, String> {
     unsafe {
         let program = gl::CreateProgram();
         gl::AttachShader(program, vs);
+        if let Some(geom) = gs {
+            gl::AttachShader(program, geom);
+        }
         gl::AttachShader(program, fs);
         gl::LinkProgram(program);
 
@@ -41,11 +66,16 @@ fn link_program(vs: u32, fs: u32) -> u32 {
             gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
             let mut buf = vec![0; len as usize];
             gl::GetProgramInfoLog(program, len, ptr::null_mut(), buf.as_mut_ptr() as *mut i8);
-            panic!("Link error: {}", String::from_utf8_lossy(&buf));
+            gl::DeleteProgram(program);
+            return Err(String::from_utf8_lossy(&buf).to_string());
         }
 
-        program
+        Ok(program)
     }
+}
+
+fn link_program(vs: u32, fs: u32, gs: Option<u32>) -> u32 {
+    try_link_program(vs, fs, gs).unwrap_or_else(|e| panic!("Link error: {e}"))
 }
 
 /// Build an 8-bit alpha bitmap for the text, automatically scaled so it fits
@@ -243,7 +273,7 @@ fn main() {
 
     let cube_vs = compile_shader(CUBE_VS_SRC, gl::VERTEX_SHADER);
     let cube_fs = compile_shader(CUBE_FS_SRC, gl::FRAGMENT_SHADER);
-    let cube_program = link_program(cube_vs, cube_fs);
+    let cube_program = link_program(cube_vs, cube_fs, None);
     unsafe {
         gl::DeleteShader(cube_vs);
         gl::DeleteShader(cube_fs);
@@ -261,6 +291,61 @@ fn main() {
         }
     "#;
 
+    // Expand each line into a screen-space quad for consistent thickness.
+    const EDGE_GS_SRC: &str = r#"
+        #version 330 core
+        layout (lines) in;
+        layout (triangle_strip, max_vertices = 4) out;
+
+        uniform vec2 u_viewport; // framebuffer size in pixels
+        uniform float u_thickness_px; // desired line thickness in pixels
+
+        void main() {
+            vec4 p0 = gl_in[0].gl_Position;
+            vec4 p1 = gl_in[1].gl_Position;
+
+            // Perspective divide to NDC
+            vec3 ndc0 = p0.xyz / p0.w;
+            vec3 ndc1 = p1.xyz / p1.w;
+
+            // Convert to pixel coords
+            vec2 s0 = (ndc0.xy * 0.5 + 0.5) * u_viewport;
+            vec2 s1 = (ndc1.xy * 0.5 + 0.5) * u_viewport;
+
+            vec2 delta = s1 - s0;
+            float len = length(delta);
+            vec2 dir = len > 1e-5 ? delta / len : vec2(1.0, 0.0);
+            // Handle degenerate case
+            if (len <= 1e-5) {
+                dir = vec2(1.0, 0.0);
+            }
+            vec2 perp = vec2(-dir.y, dir.x);
+            vec2 offset = perp * (u_thickness_px * 0.5);
+
+            // Build quad in screen space
+            vec2 s0a = s0 + offset;
+            vec2 s0b = s0 - offset;
+            vec2 s1a = s1 + offset;
+            vec2 s1b = s1 - offset;
+
+            // Convert back to NDC
+            vec2 ndc0a = (s0a / u_viewport) * 2.0 - 1.0;
+            vec2 ndc0b = (s0b / u_viewport) * 2.0 - 1.0;
+            vec2 ndc1a = (s1a / u_viewport) * 2.0 - 1.0;
+            vec2 ndc1b = (s1b / u_viewport) * 2.0 - 1.0;
+
+            gl_Position = vec4(ndc0a, ndc0.z, 1.0);
+            EmitVertex();
+            gl_Position = vec4(ndc0b, ndc0.z, 1.0);
+            EmitVertex();
+            gl_Position = vec4(ndc1a, ndc1.z, 1.0);
+            EmitVertex();
+            gl_Position = vec4(ndc1b, ndc1.z, 1.0);
+            EmitVertex();
+            EndPrimitive();
+        }
+    "#;
+
     const EDGE_FS_SRC: &str = r#"
         #version 330 core
         out vec4 FragColor;
@@ -272,7 +357,26 @@ fn main() {
 
     let edge_vs = compile_shader(EDGE_VS_SRC, gl::VERTEX_SHADER);
     let edge_fs = compile_shader(EDGE_FS_SRC, gl::FRAGMENT_SHADER);
-    let edge_program = link_program(edge_vs, edge_fs);
+
+    let mut edge_use_gs = false;
+    let edge_program =
+        match compile_shader_fallible(EDGE_GS_SRC, gl::GEOMETRY_SHADER).and_then(|edge_gs| {
+            let linked = try_link_program(edge_vs, edge_fs, Some(edge_gs));
+            unsafe {
+                gl::DeleteShader(edge_gs);
+            }
+            linked
+        }) {
+            Ok(prog) => {
+                edge_use_gs = true;
+                prog
+            }
+            Err(err) => {
+                eprintln!("Geometry shader unavailable, falling back to GL lines: {err}");
+                link_program(edge_vs, edge_fs, None)
+            }
+        };
+
     unsafe {
         gl::DeleteShader(edge_vs);
         gl::DeleteShader(edge_fs);
@@ -395,10 +499,25 @@ fn main() {
     }
 
     let edge_u_mvp_loc;
+    let edge_u_viewport_loc;
+    let edge_u_thickness_loc;
     unsafe {
         gl::UseProgram(edge_program);
         edge_u_mvp_loc =
             gl::GetUniformLocation(edge_program, CString::new("u_mvp").unwrap().as_ptr());
+        edge_u_viewport_loc = if edge_use_gs {
+            gl::GetUniformLocation(edge_program, CString::new("u_viewport").unwrap().as_ptr())
+        } else {
+            -1
+        };
+        edge_u_thickness_loc = if edge_use_gs {
+            gl::GetUniformLocation(
+                edge_program,
+                CString::new("u_thickness_px").unwrap().as_ptr(),
+            )
+        } else {
+            -1
+        };
     }
 
     // Build text texture (auto-scaled and centered).
@@ -455,9 +574,14 @@ fn main() {
             // Draw edges on top
             gl::UseProgram(edge_program);
             gl::UniformMatrix4fv(edge_u_mvp_loc, 1, gl::FALSE, edge_mvp.as_ptr());
+            if edge_use_gs {
+                gl::Uniform2f(edge_u_viewport_loc, w as f32, h as f32);
+                gl::Uniform1f(edge_u_thickness_loc, 2.0);
+            } else {
+                gl::LineWidth(2.0);
+            }
 
             gl::BindVertexArray(edge_vao);
-            gl::LineWidth(2.0);
             gl::DrawElements(
                 gl::LINES,
                 EDGE_INDICES.len() as i32,
