@@ -207,7 +207,7 @@ fn main() {
     }
 
     // Cube shaders with text texture
-    let cube_vs_src = r#"
+    const CUBE_VS_SRC: &str = r#"
         #version 330 core
         layout (location = 0) in vec3 aPos;
         layout (location = 1) in vec2 aUV;
@@ -222,7 +222,7 @@ fn main() {
         }
     "#;
 
-    let cube_fs_src = r#"
+    const CUBE_FS_SRC: &str = r#"
         #version 330 core
         in vec2 vUV;
         out vec4 FragColor;
@@ -236,8 +236,8 @@ fn main() {
         }
     "#;
 
-    let cube_vs = compile_shader(cube_vs_src, gl::VERTEX_SHADER);
-    let cube_fs = compile_shader(cube_fs_src, gl::FRAGMENT_SHADER);
+    let cube_vs = compile_shader(CUBE_VS_SRC, gl::VERTEX_SHADER);
+    let cube_fs = compile_shader(CUBE_FS_SRC, gl::FRAGMENT_SHADER);
     let cube_program = link_program(cube_vs, cube_fs);
     unsafe {
         gl::DeleteShader(cube_vs);
@@ -245,7 +245,7 @@ fn main() {
     }
 
     // Edge shaders (black lines)
-    let edge_vs_src = r#"
+    const EDGE_VS_SRC: &str = r#"
         #version 330 core
         layout (location = 0) in vec3 aPos;
 
@@ -256,7 +256,7 @@ fn main() {
         }
     "#;
 
-    let edge_fs_src = r#"
+    const EDGE_FS_SRC: &str = r#"
         #version 330 core
         out vec4 FragColor;
 
@@ -265,8 +265,8 @@ fn main() {
         }
     "#;
 
-    let edge_vs = compile_shader(edge_vs_src, gl::VERTEX_SHADER);
-    let edge_fs = compile_shader(edge_fs_src, gl::FRAGMENT_SHADER);
+    let edge_vs = compile_shader(EDGE_VS_SRC, gl::VERTEX_SHADER);
+    let edge_fs = compile_shader(EDGE_FS_SRC, gl::FRAGMENT_SHADER);
     let edge_program = link_program(edge_vs, edge_fs);
     unsafe {
         gl::DeleteShader(edge_vs);
@@ -274,7 +274,7 @@ fn main() {
     }
 
     // Cube vertices: position (x,y,z) + uv (u,v)
-    let cube_vertices: [f32; 36 * 5] = [
+    const CUBE_VERTICES: [f32; 36 * 5] = [
         // front
         -0.5, -0.5, 0.5, 0.0, 0.0, 0.5, -0.5, 0.5, 1.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 0.5, 0.5, 0.5,
         1.0, 1.0, -0.5, 0.5, 0.5, 0.0, 1.0, -0.5, -0.5, 0.5, 0.0, 0.0, // back
@@ -300,8 +300,8 @@ fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, cube_vbo);
         gl::BufferData(
             gl::ARRAY_BUFFER,
-            (cube_vertices.len() * std::mem::size_of::<f32>()) as isize,
-            cube_vertices.as_ptr() as *const _,
+            (CUBE_VERTICES.len() * std::mem::size_of::<f32>()) as isize,
+            CUBE_VERTICES.as_ptr() as *const _,
             gl::STATIC_DRAW,
         );
 
@@ -324,7 +324,7 @@ fn main() {
     }
 
     // Edge geometry: 8 corners, 12 edges as lines.
-    let edge_vertices: [f32; 8 * 3] = [
+    const EDGE_VERTICES: [f32; 8 * 3] = [
         // back face
         -0.5, -0.5, -0.5, // 0
         0.5, -0.5, -0.5, // 1
@@ -337,7 +337,7 @@ fn main() {
         -0.5, 0.5, 0.5, // 7
     ];
 
-    let edge_indices: [u32; 24] = [
+    const EDGE_INDICES: [u32; 24] = [
         // back square
         0, 1, 1, 2, 2, 3, 3, 0, // front square
         4, 5, 5, 6, 6, 7, 7, 4, // connections
@@ -358,16 +358,16 @@ fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, edge_vbo);
         gl::BufferData(
             gl::ARRAY_BUFFER,
-            (edge_vertices.len() * std::mem::size_of::<f32>()) as isize,
-            edge_vertices.as_ptr() as *const _,
+            (EDGE_VERTICES.len() * std::mem::size_of::<f32>()) as isize,
+            EDGE_VERTICES.as_ptr() as *const _,
             gl::STATIC_DRAW,
         );
 
         gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, edge_ebo);
         gl::BufferData(
             gl::ELEMENT_ARRAY_BUFFER,
-            (edge_indices.len() * std::mem::size_of::<u32>()) as isize,
-            edge_indices.as_ptr() as *const _,
+            (EDGE_INDICES.len() * std::mem::size_of::<u32>()) as isize,
+            EDGE_INDICES.as_ptr() as *const _,
             gl::STATIC_DRAW,
         );
 
@@ -461,7 +461,7 @@ fn main() {
             gl::LineWidth(2.0);
             gl::DrawElements(
                 gl::LINES,
-                edge_indices.len() as i32,
+                EDGE_INDICES.len() as i32,
                 gl::UNSIGNED_INT,
                 ptr::null(),
             );
