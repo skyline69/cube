@@ -17,6 +17,7 @@ cgmath = "0.18.0"
 gl = "0.14.0"
 glfw = "0.60.0"
 rusttype = "0.9.3"
+thiserror = "2.0.17"
 
 [profile.dev]
 opt-level = 1

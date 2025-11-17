@@ -1,36 +1,41 @@
 use cgmath::{Deg, Matrix, Matrix4, Point3, Vector3, perspective};
 use glfw::{Action, Context, Key};
 use rusttype::{Font, Scale, point};
+use thiserror::Error;
 
 use std::env;
 use std::ffi::{CString, c_void};
 use std::ptr;
 
-fn compile_shader(src: &str, kind: gl::types::GLenum) -> u32 {
-    unsafe {
-        let shader = gl::CreateShader(kind);
-        let c_src = CString::new(src).unwrap();
-        gl::ShaderSource(shader, 1, &c_src.as_ptr(), ptr::null());
-        gl::CompileShader(shader);
+type AppResult<T> = Result<T, CubeError>;
 
-        let mut success = 0;
-        gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
-        if success == 0 {
-            let mut len = 0;
-            gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
-            let mut buf = vec![0; len as usize];
-            gl::GetShaderInfoLog(shader, len, ptr::null_mut(), buf.as_mut_ptr() as *mut i8);
-            panic!("Shader error: {}", String::from_utf8_lossy(&buf));
-        }
-
-        shader
-    }
+#[derive(Debug, Error)]
+enum CubeError {
+    #[error("label must be under {limit} characters (got {len})")]
+    LabelTooLong { limit: usize, len: usize },
+    #[error("failed to initialise GLFW: {0}")]
+    GlfwInit(#[source] glfw::InitError),
+    #[error("failed to create window ({width}x{height})")]
+    WindowCreation { width: u32, height: u32 },
+    #[error("invalid font data bundled with the app")]
+    FontLoad,
+    #[error("shader source contained interior null bytes")]
+    InvalidShaderSource(#[from] std::ffi::NulError),
+    #[error("{stage} shader compilation failed: {message}")]
+    ShaderCompile {
+        stage: &'static str,
+        message: String,
+    },
+    #[error("program linking failed: {0}")]
+    ProgramLink(String),
+    #[error("missing required OpenGL functions: {missing:?}")]
+    MissingGlFunctions { missing: Vec<String> },
 }
 
-fn compile_shader_fallible(src: &str, kind: gl::types::GLenum) -> Result<u32, String> {
+fn compile_shader(src: &str, kind: gl::types::GLenum, stage: &'static str) -> AppResult<u32> {
     unsafe {
         let shader = gl::CreateShader(kind);
-        let c_src = CString::new(src).map_err(|e| e.to_string())?;
+        let c_src = CString::new(src).map_err(CubeError::InvalidShaderSource)?;
         gl::ShaderSource(shader, 1, &c_src.as_ptr(), ptr::null());
         gl::CompileShader(shader);
 
@@ -42,14 +47,17 @@ fn compile_shader_fallible(src: &str, kind: gl::types::GLenum) -> Result<u32, St
             let mut buf = vec![0; len as usize];
             gl::GetShaderInfoLog(shader, len, ptr::null_mut(), buf.as_mut_ptr() as *mut i8);
             gl::DeleteShader(shader);
-            return Err(String::from_utf8_lossy(&buf).to_string());
+            return Err(CubeError::ShaderCompile {
+                stage,
+                message: String::from_utf8_lossy(&buf).to_string(),
+            });
         }
 
         Ok(shader)
     }
 }
 
-fn try_link_program(vs: u32, fs: u32, gs: Option<u32>) -> Result<u32, String> {
+fn link_program(vs: u32, fs: u32, gs: Option<u32>) -> AppResult<u32> {
     unsafe {
         let program = gl::CreateProgram();
         gl::AttachShader(program, vs);
@@ -67,22 +75,20 @@ fn try_link_program(vs: u32, fs: u32, gs: Option<u32>) -> Result<u32, String> {
             let mut buf = vec![0; len as usize];
             gl::GetProgramInfoLog(program, len, ptr::null_mut(), buf.as_mut_ptr() as *mut i8);
             gl::DeleteProgram(program);
-            return Err(String::from_utf8_lossy(&buf).to_string());
+            return Err(CubeError::ProgramLink(
+                String::from_utf8_lossy(&buf).to_string(),
+            ));
         }
 
         Ok(program)
     }
 }
 
-fn link_program(vs: u32, fs: u32, gs: Option<u32>) -> u32 {
-    try_link_program(vs, fs, gs).unwrap_or_else(|e| panic!("Link error: {e}"))
-}
-
 /// Build an 8-bit alpha bitmap for the text, automatically scaled so it fits
 /// inside a fixed square texture (e.g. 512×512) with a margin, and centered.
-fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
+fn build_text_bitmap_auto(text: &str) -> AppResult<(Vec<u8>, u32, u32)> {
     static FONT_DATA: &[u8] = include_bytes!("../assets/Arial.ttf");
-    let font = Font::try_from_bytes(FONT_DATA).expect("Invalid font");
+    let font = Font::try_from_bytes(FONT_DATA).ok_or(CubeError::FontLoad)?;
 
     const TEX_SIZE: u32 = 512;
     const MARGIN_FRAC: f32 = 0.8;
@@ -113,7 +119,7 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
     }
 
     if min_x == i32::MAX {
-        return (Vec::new(), TEX_SIZE, TEX_SIZE);
+        return Ok((Vec::new(), TEX_SIZE, TEX_SIZE));
     }
 
     let base_w = (max_x - min_x) as f32;
@@ -173,7 +179,7 @@ fn build_text_bitmap_auto(text: &str) -> (Vec<u8>, u32, u32) {
         }
     }
 
-    (bitmap, TEX_W, TEX_H)
+    Ok((bitmap, TEX_W, TEX_H))
 }
 
 fn create_text_texture(bitmap: &[u8], w: u32, h: u32) -> u32 {
@@ -205,17 +211,26 @@ fn create_text_texture(bitmap: &[u8], w: u32, h: u32) -> u32 {
 }
 
 fn main() {
+    if let Err(err) = run() {
+        eprintln!("error: {err}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> AppResult<()> {
     const LABEL_CHAR_LIMIT: usize = 256;
 
     let label = env::args().nth(1).unwrap_or_else(|| "cube".to_string());
 
     if label.len() > LABEL_CHAR_LIMIT {
-        eprintln!("error: label must be < {} characters", LABEL_CHAR_LIMIT);
-        std::process::exit(-1);
+        return Err(CubeError::LabelTooLong {
+            limit: LABEL_CHAR_LIMIT,
+            len: label.len(),
+        });
     }
     let window_title = format!("cube - {label}");
 
-    let mut glfw = glfw::init(glfw::fail_on_errors).expect("Failed to init GLFW");
+    let mut glfw = glfw::init(glfw::fail_on_errors).map_err(CubeError::GlfwInit)?;
 
     glfw.window_hint(glfw::WindowHint::ContextVersionMajor(3));
     glfw.window_hint(glfw::WindowHint::ContextVersionMinor(3));
@@ -228,18 +243,30 @@ fn main() {
 
     let (mut window, events) = glfw
         .create_window(800, 600, &window_title, glfw::WindowMode::Windowed)
-        .expect("Failed to create window");
+        .ok_or(CubeError::WindowCreation {
+            width: 800,
+            height: 600,
+        })?;
 
     window.make_current();
     window.set_key_polling(true);
     glfw.set_swap_interval(glfw::SwapInterval::Sync(1));
 
+    let mut missing_gl_symbols: Vec<String> = Vec::new();
     gl::load_with(|s| {
         window
             .get_proc_address(s)
             .map(|f| f as *const c_void)
-            .unwrap_or(ptr::null())
+            .unwrap_or_else(|| {
+                missing_gl_symbols.push(s.to_string());
+                ptr::null()
+            })
     });
+    if !missing_gl_symbols.is_empty() {
+        return Err(CubeError::MissingGlFunctions {
+            missing: missing_gl_symbols,
+        });
+    }
 
     unsafe {
         gl::Enable(gl::DEPTH_TEST);
@@ -278,9 +305,9 @@ fn main() {
         }
     "#;
 
-    let cube_vs = compile_shader(CUBE_VS_SRC, gl::VERTEX_SHADER);
-    let cube_fs = compile_shader(CUBE_FS_SRC, gl::FRAGMENT_SHADER);
-    let cube_program = link_program(cube_vs, cube_fs, None);
+    let cube_vs = compile_shader(CUBE_VS_SRC, gl::VERTEX_SHADER, "cube vertex")?;
+    let cube_fs = compile_shader(CUBE_FS_SRC, gl::FRAGMENT_SHADER, "cube fragment")?;
+    let cube_program = link_program(cube_vs, cube_fs, None)?;
     unsafe {
         gl::DeleteShader(cube_vs);
         gl::DeleteShader(cube_fs);
@@ -362,27 +389,27 @@ fn main() {
         }
     "#;
 
-    let edge_vs = compile_shader(EDGE_VS_SRC, gl::VERTEX_SHADER);
-    let edge_fs = compile_shader(EDGE_FS_SRC, gl::FRAGMENT_SHADER);
+    let edge_vs = compile_shader(EDGE_VS_SRC, gl::VERTEX_SHADER, "edge vertex")?;
+    let edge_fs = compile_shader(EDGE_FS_SRC, gl::FRAGMENT_SHADER, "edge fragment")?;
 
     let mut edge_use_gs = false;
-    let edge_program =
-        match compile_shader_fallible(EDGE_GS_SRC, gl::GEOMETRY_SHADER).and_then(|edge_gs| {
-            let linked = try_link_program(edge_vs, edge_fs, Some(edge_gs));
+    let edge_program = match compile_shader(EDGE_GS_SRC, gl::GEOMETRY_SHADER, "edge geometry")
+        .and_then(|edge_gs| {
+            let linked = link_program(edge_vs, edge_fs, Some(edge_gs));
             unsafe {
                 gl::DeleteShader(edge_gs);
             }
             linked
         }) {
-            Ok(prog) => {
-                edge_use_gs = true;
-                prog
-            }
-            Err(err) => {
-                eprintln!("Geometry shader unavailable, falling back to GL lines: {err}");
-                link_program(edge_vs, edge_fs, None)
-            }
-        };
+        Ok(prog) => {
+            edge_use_gs = true;
+            Ok(prog)
+        }
+        Err(err) => {
+            eprintln!("Geometry shader unavailable, falling back to GL lines: {err}");
+            link_program(edge_vs, edge_fs, None)
+        }
+    }?;
 
     unsafe {
         gl::DeleteShader(edge_vs);
@@ -496,39 +523,38 @@ fn main() {
 
     let cube_u_mvp_loc;
     let cube_u_tex_loc;
+    let cube_u_mvp_cstr = CString::new("u_mvp")?;
+    let cube_u_tex_cstr = CString::new("u_tex")?;
     unsafe {
         gl::UseProgram(cube_program);
-        cube_u_mvp_loc =
-            gl::GetUniformLocation(cube_program, CString::new("u_mvp").unwrap().as_ptr());
-        cube_u_tex_loc =
-            gl::GetUniformLocation(cube_program, CString::new("u_tex").unwrap().as_ptr());
+        cube_u_mvp_loc = gl::GetUniformLocation(cube_program, cube_u_mvp_cstr.as_ptr());
+        cube_u_tex_loc = gl::GetUniformLocation(cube_program, cube_u_tex_cstr.as_ptr());
         gl::Uniform1i(cube_u_tex_loc, 0);
     }
 
     let edge_u_mvp_loc;
     let edge_u_viewport_loc;
     let edge_u_thickness_loc;
+    let edge_u_mvp_cstr = CString::new("u_mvp")?;
+    let edge_u_viewport_cstr = CString::new("u_viewport")?;
+    let edge_u_thickness_cstr = CString::new("u_thickness_px")?;
     unsafe {
         gl::UseProgram(edge_program);
-        edge_u_mvp_loc =
-            gl::GetUniformLocation(edge_program, CString::new("u_mvp").unwrap().as_ptr());
+        edge_u_mvp_loc = gl::GetUniformLocation(edge_program, edge_u_mvp_cstr.as_ptr());
         edge_u_viewport_loc = if edge_use_gs {
-            gl::GetUniformLocation(edge_program, CString::new("u_viewport").unwrap().as_ptr())
+            gl::GetUniformLocation(edge_program, edge_u_viewport_cstr.as_ptr())
         } else {
             -1
         };
         edge_u_thickness_loc = if edge_use_gs {
-            gl::GetUniformLocation(
-                edge_program,
-                CString::new("u_thickness_px").unwrap().as_ptr(),
-            )
+            gl::GetUniformLocation(edge_program, edge_u_thickness_cstr.as_ptr())
         } else {
             -1
         };
     }
 
     // Build text texture (auto-scaled and centered).
-    let (text_bitmap, text_w, text_h) = build_text_bitmap_auto(&label);
+    let (text_bitmap, text_w, text_h) = build_text_bitmap_auto(&label)?;
     let text_tex = if text_w > 0 && text_h > 0 {
         create_text_texture(&text_bitmap, text_w, text_h)
     } else {
@@ -619,4 +645,5 @@ fn main() {
 
     drop(window);
     drop(glfw);
+    Ok(())
 }
