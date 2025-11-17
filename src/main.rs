@@ -185,6 +185,7 @@ fn main() {
     glfw.window_hint(glfw::WindowHint::OpenGlProfile(
         glfw::OpenGlProfileHint::Core,
     ));
+    glfw.window_hint(glfw::WindowHint::Samples(Some(4)));
 
     let (mut window, events) = glfw
         .create_window(800, 600, &window_title, glfw::WindowMode::Windowed)
@@ -192,6 +193,7 @@ fn main() {
 
     window.make_current();
     window.set_key_polling(true);
+    glfw.set_swap_interval(glfw::SwapInterval::Sync(1));
 
     gl::load_with(|s| {
         window
@@ -204,6 +206,7 @@ fn main() {
         gl::Enable(gl::DEPTH_TEST);
         gl::Enable(gl::BLEND);
         gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+        gl::Enable(gl::MULTISAMPLE);
     }
 
     // Cube shaders with text texture
