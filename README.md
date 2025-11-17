@@ -1,5 +1,7 @@
 cube
 ====
+![demo](https://github.com/user-attachments/assets/50b58d46-10af-438f-9415-1fa740a3cac9)
+> `cube balls`
 
 Spin a cube. Stamp it with your word. Enjoy the show.
 
@@ -7,7 +9,7 @@ Works on Linux, macOS and Windows.
 
 # Install it
 ```bash
-cargo install cube
+cargo install cube-command
 ```
 
 Run it
