@@ -4,6 +4,10 @@ rustflags = [
     "link-arg=-Wl,-rpath,@executable_path",
     "-C",
     "link-arg=-Wl,-rpath,@executable_path/../lib",
+    "-C",
+    "link-arg=-Wl,-rpath,/usr/local/opt/glfw/lib",
+    "-C",
+    "link-arg=-Wl,-rpath,/opt/homebrew/opt/glfw/lib",
 ]
 
 [target.aarch64-apple-darwin]
@@ -12,4 +16,8 @@ rustflags = [
     "link-arg=-Wl,-rpath,@executable_path",
     "-C",
     "link-arg=-Wl,-rpath,@executable_path/../lib",
+    "-C",
+    "link-arg=-Wl,-rpath,/usr/local/opt/glfw/lib",
+    "-C",
+    "link-arg=-Wl,-rpath,/opt/homebrew/opt/glfw/lib",
 ]
