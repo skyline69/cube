@@ -10,8 +10,8 @@ glfw = "0.60.0"
 rusttype = "0.9.3"
 
 [profile.release]
-opt-level = "z"   # or "3" if you prefer maximum speed
-lto = "fat"       # cross-crate LTO
-codegen-units = 1 # better optimization
-panic = "abort"   # removes unwinding runtime
-strip = "symbols" # removes debug symbols
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

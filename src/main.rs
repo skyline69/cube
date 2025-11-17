@@ -205,7 +205,14 @@ fn create_text_texture(bitmap: &[u8], w: u32, h: u32) -> u32 {
 }
 
 fn main() {
+    const LABEL_CHAR_LIMIT: usize = 256;
+
     let label = env::args().nth(1).unwrap_or_else(|| "cube".to_string());
+
+    if label.len() > LABEL_CHAR_LIMIT {
+        eprintln!("error: label must be < {} characters", LABEL_CHAR_LIMIT);
+        std::process::exit(-1);
+    }
     let window_title = format!("cube - {label}");
 
     let mut glfw = glfw::init(glfw::fail_on_errors).expect("Failed to init GLFW");
