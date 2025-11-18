@@ -252,16 +252,65 @@ fn run() -> AppResult<()> {
     window.set_key_polling(true);
     glfw.set_swap_interval(glfw::SwapInterval::Sync(1));
 
-    let mut missing_gl_symbols: Vec<String> = Vec::new();
     gl::load_with(|s| {
         window
             .get_proc_address(s)
             .map(|f| f as *const c_void)
-            .unwrap_or_else(|| {
-                missing_gl_symbols.push(s.to_string());
-                ptr::null()
-            })
+            .unwrap_or(ptr::null())
     });
+
+    // Only fail fast on the symbols we actually call; macOS OpenGL 3.3 is missing
+    // many newer entrypoints, but we don't need them.
+    const REQUIRED_GL_FUNCS: &[&str] = &[
+        "glCreateShader",
+        "glShaderSource",
+        "glCompileShader",
+        "glGetShaderiv",
+        "glGetShaderInfoLog",
+        "glDeleteShader",
+        "glCreateProgram",
+        "glAttachShader",
+        "glLinkProgram",
+        "glGetProgramiv",
+        "glGetProgramInfoLog",
+        "glDeleteProgram",
+        "glGenTextures",
+        "glBindTexture",
+        "glTexImage2D",
+        "glTexParameteri",
+        "glGenVertexArrays",
+        "glGenBuffers",
+        "glBindVertexArray",
+        "glBindBuffer",
+        "glBufferData",
+        "glVertexAttribPointer",
+        "glEnableVertexAttribArray",
+        "glUseProgram",
+        "glGetUniformLocation",
+        "glUniform1i",
+        "glUniform1f",
+        "glUniform2f",
+        "glUniformMatrix4fv",
+        "glActiveTexture",
+        "glViewport",
+        "glClearColor",
+        "glClear",
+        "glDrawArrays",
+        "glDrawElements",
+        "glLineWidth",
+        "glBlendFunc",
+        "glEnable",
+        "glDeleteVertexArrays",
+        "glDeleteBuffers",
+        "glDeleteTextures",
+    ];
+
+    let missing_gl_symbols: Vec<String> = REQUIRED_GL_FUNCS
+        .iter()
+        .copied()
+        .filter(|name| window.get_proc_address(name).is_none())
+        .map(str::to_string)
+        .collect();
     if !missing_gl_symbols.is_empty() {
         return Err(CubeError::MissingGlFunctions {
             missing: missing_gl_symbols,
