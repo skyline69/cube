@@ -15,7 +15,7 @@ categories = ["graphics", "rendering"]
 [dependencies]
 cgmath = "0.18.0"
 gl = "0.14.0"
-glfw = { version = "0.60.0", features = ["prebuilt-libs"] }
+glfw = { version = "0.60.0", features = ["prebuilt-libs", "static-link"] }
 rusttype = "0.9.3"
 thiserror = "2.0.17"
 
