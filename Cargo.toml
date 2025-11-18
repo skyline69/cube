@@ -1,6 +1,6 @@
 [package]
 name = "cube-command"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = true
 license-file = "LICENSE"
@@ -15,7 +15,7 @@ categories = ["graphics", "rendering"]
 [dependencies]
 cgmath = "0.18.0"
 gl = "0.14.0"
-glfw = "0.60.0"
+glfw = { version = "0.60.0", features = ["prebuilt-libs"] }
 rusttype = "0.9.3"
 thiserror = "2.0.17"
 

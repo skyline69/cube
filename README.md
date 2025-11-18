@@ -30,9 +30,9 @@ Why it’s cool
 
 Platform requirements
 ---------------------
-- macOS: Xcode Command Line Tools (for clang) and an OpenGL 3.3-capable GPU/driver.
-- Windows: Latest Visual C++ Build Tools or MSVC via Visual Studio; GPU/driver with OpenGL 3.3 support.
-- Linux: Build essentials (`clang`/`gcc`, `make`), and GL loader packages (e.g., Ubuntu: `libx11-dev libgl1-mesa-dev libglu1-mesa-dev`).
+- macOS: Xcode Command Line Tools (for clang) and an OpenGL 3.3-capable GPU/driver. GLFW ships prebuilt with the crate—no extra brew install needed.
+- Windows: Latest Visual C++ Build Tools or MSVC via Visual Studio; GPU/driver with OpenGL 3.3 support. GLFW is bundled.
+- Linux: Build essentials (`clang`/`gcc`, `make`), and GL loader packages (e.g., Ubuntu: `libx11-dev libgl1-mesa-dev libglu1-mesa-dev`). GLFW is bundled.
 
 License
 -------
